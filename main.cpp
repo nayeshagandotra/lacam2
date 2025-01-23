@@ -18,7 +18,7 @@ int main(int argc, char* argv[])
       .default_value(std::string("0"));
   program.add_argument("-t", "--time_limit_sec")
       .help("time limit sec")
-      .default_value(std::string("3"));
+      .default_value(std::string("10"));
   program.add_argument("-o", "--output")
       .help("output file")
       .default_value(std::string("./build/result.txt"));
@@ -36,6 +36,18 @@ int main(int argc, char* argv[])
   program.add_argument("-r", "--restart_rate")
       .help("restart rate")
       .default_value(std::string("0.001"));
+  // New arguments: bool_opti and opti_deadline
+  program.add_argument("--bool_opti")
+      .default_value(false)
+      .implicit_value(true)
+      .help("Enable optimization mode (boolean)");
+  program.add_argument("--opti_deadline")
+      .help("Optimization deadline in ms")
+      .default_value(std::string("10"));
+  program.add_argument("--functype")
+      .help("Function type to use (opti or not, etc.)")
+      .default_value(std::string(""));
+
 
   try {
     program.parse_known_args(argc, argv);
@@ -56,6 +68,11 @@ int main(int argc, char* argv[])
   const auto output_name = program.get<std::string>("output");
   const auto log_short = program.get<bool>("log_short");
   const auto N = std::stoi(program.get<std::string>("num"));
+  // New arguments
+  const auto bool_opti = program.get<bool>("bool_opti");
+  auto opti_deadline_ms =
+      std::stoi(program.get<std::string>("opti_deadline"));
+  auto functype = program.get<std::string>("functype");
   const auto ins = scen_name.size() > 0 ? Instance(scen_name, map_name, N)
                                         : Instance(map_name, &MT, N);
   const auto objective =
@@ -66,7 +83,9 @@ int main(int argc, char* argv[])
   // solve
   auto additional_info = std::string("");
   const auto deadline = Deadline(time_limit_sec * 1000);
-  const auto solution = solve(ins, additional_info, verbose - 1, &deadline, &MT,
+  auto opti_deadline = Deadline(opti_deadline_ms);
+  const auto solution = solve(ins, additional_info, verbose - 1, &deadline, 
+                              &opti_deadline, bool_opti, functype, &MT,                             
                               objective, restart_rate);
   const auto comp_time_ms = deadline.elapsed_ms();
 

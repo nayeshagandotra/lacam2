@@ -34,17 +34,23 @@ void info(const int level, const int verbose, Head&& head, Tail&&... tail)
 
 // time manager
 struct Deadline {
-  const Time::time_point t_s;
-  const double time_limit_ms;
+  Time::time_point t_s;
+  double time_limit_ms;
+  double time_limit_ns;
 
   Deadline(double _time_limit_ms = 0);
   double elapsed_ms() const;
   double elapsed_ns() const;
+
+  // New reset function
+  void reset();
 };
 
 double elapsed_ms(const Deadline* deadline);
 double elapsed_ns(const Deadline* deadline);
 bool is_expired(const Deadline* deadline);
+bool is_expired_ns(const Deadline* deadline);
+
 
 float get_random_float(std::mt19937* MT, float from = 0, float to = 1);
 int get_random_int(std::mt19937* MT, int from = 0, int to = 1);

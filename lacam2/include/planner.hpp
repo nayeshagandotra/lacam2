@@ -14,13 +14,33 @@ enum Objective { OBJ_NONE, OBJ_MAKESPAN, OBJ_SUM_OF_LOSS };
 std::ostream& operator<<(std::ostream& os, const Objective objective);
 
 // PIBT agent
+// struct Agent {
+//   const uint id;
+//   Vertex* v_now;   // current location
+//   Vertex* v_next;  // next location
+//   Agent(uint _id) : id(_id), v_now(nullptr), v_next(nullptr) {}
+// };
+// using Agents = std::vector<Agent*>;
+
+struct Agent; 
+using Agents = std::vector<Agent*>; 
+using Candidates = std::vector<std::array<Vertex*, 5> >;
+
+
+// PIBT agent
 struct Agent {
-  const uint id;
-  Vertex* v_now;   // current location
-  Vertex* v_next;  // next location
-  Agent(uint _id) : id(_id), v_now(nullptr), v_next(nullptr) {}
+  int id;
+  Vertex* v_now;        // current location
+  Vertex* v_next;       // next location
+  Vertex* v_next_best;  // best next location
+  float tie_breaker;  // epsilon, tie-breaker
+  bool is_constrained; //should we recurse through all the actions?
+  Agents* group;        // group this belongs to
+  int priority;
+  // trying new vars
+  Candidates C_next;                // next location candidates
+  int penalty;
 };
-using Agents = std::vector<Agent*>;
 
 // low-level node
 struct LNode {
@@ -59,8 +79,17 @@ using HNodes = std::vector<HNode*>;
 struct Planner {
   const Instance* ins;
   const Deadline* deadline;
+  Deadline* opti_deadline;
   std::mt19937* MT;
   const int verbose;
+  bool opti;
+  std::string functype;
+
+  // new ints
+  int timestep_penalty;
+  int best_penalty;
+  int group_no;
+  int num_grouped_agents;
 
   // hyper parameters
   const Objective objective;
@@ -76,8 +105,12 @@ struct Planner {
   std::vector<std::array<Vertex*, 5> > C_next;  // next locations, used in PIBT
   std::vector<float> tie_breakers;              // random values, used in PIBT
   Agents A;
-  Agents occupied_now;                          // for quick collision checking
-  Agents occupied_next;                         // for quick collision checking
+  Agents A_copy;
+  Agents occupied_now;   // for quick collision checking
+  Agents occupied_next;  // for quick collision checking
+
+  using Groups = std::vector<Agents*>;
+  Groups groups;
 
   Planner(const Instance* _ins, const Deadline* _deadline, std::mt19937* _MT,
           const int _verbose = 0,
@@ -93,7 +126,19 @@ struct Planner {
   uint get_edge_cost(HNode* H_from, HNode* H_to);
   uint get_h_value(const Config& C);
   bool get_new_config(HNode* H, LNode* L);
+
+  // funcpibt versions
   bool funcPIBT(Agent* ai);
+  bool funcPIBTwswap(Agent* ai);
+  bool funcPIBTgroups(Agent* ai);
+
+  // new functions
+  int calculate_penalty(Agent* ai);
+  void print_penalty(const std::string& filename, int penalty);
+  void refresh_lists(Agents A);
+  bool addToGroup(Agent* ai, Agent* aj, bool del_group);
+  std::pair<bool, int> OptiPIBT(Agents A, Agent* aj, int accumulated_penalty);
+
 
   // swap operation
   Agent* swap_possible_and_required(Agent* ai);
