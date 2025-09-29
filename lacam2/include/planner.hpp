@@ -40,6 +40,7 @@ struct Agent {
   // trying new vars
   Candidates C_next;                // next location candidates
   int penalty;
+  int action_penalty;
 };
 
 // low-level node

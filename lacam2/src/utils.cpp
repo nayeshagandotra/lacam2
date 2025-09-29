@@ -41,7 +41,7 @@ void Deadline::reset()
 bool is_expired(const Deadline* deadline)
 {
   if (deadline == nullptr) return false;
-  return deadline->elapsed_ms() > deadline->time_limit_ms;
+  return deadline->elapsed_ms() >= deadline->time_limit_ms;
 }
 
 bool is_expired_ns(const Deadline* deadline)

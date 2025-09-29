@@ -210,10 +210,6 @@ bool Planner::addToGroup(Agent* ai, Agent* aj, bool del_group) {
 
 std::pair<bool, int> Planner::OptiPIBT(Agents A, Agent* aj, int accumulated_penalty){
 
-  if (is_expired_ns(opti_deadline)){
-    return std::make_pair(false, 100000);
-  }
-
   std::sort(A.begin(), A.end(), [](Agent* a, Agent* b) {
         return a->priority < b->priority; // Ascending order
     });
@@ -226,6 +222,10 @@ std::pair<bool, int> Planner::OptiPIBT(Agents A, Agent* aj, int accumulated_pena
     ai = aj;
   }
 
+  if (is_expired_ns(opti_deadline)){
+    return std::make_pair(true, 100000);
+  }
+
   // get subset of agents
   Agents agents_subset;
   // Copy all pointers except for agent ai
@@ -235,24 +235,24 @@ std::pair<bool, int> Planner::OptiPIBT(Agents A, Agent* aj, int accumulated_pena
   const auto i = ai->id;
   const auto K = ai->v_now->neighbor.size();
 
-  // get candidates for next locations
-  for (size_t k = 0; k < K; ++k) {
-    auto u = ai->v_now->neighbor[k];
-    C_next[i][k] = u;
-    if (MT != nullptr)
-      tie_breakers[u->id] = get_random_float(MT);  // set tie-breaker get_random_float(MT)
-  }
-  C_next[i][K] = ai->v_now;
+  // // get candidates for next locations
+  // for (size_t k = 0; k < K; ++k) {
+  //   auto u = ai->v_now->neighbor[k];
+  //   C_next[i][k] = u;
+  //   if (MT != nullptr)
+  //     tie_breakers[u->id] = get_random_float(MT);  // set tie-breaker get_random_float(MT)
+  // }
+  // C_next[i][K] = ai->v_now;
 
-  // sort, note: K + 1 is sufficient
-  std::sort(C_next[i].begin(), C_next[i].begin() + K + 1,
-            [&](Vertex* const v, Vertex* const u) {
-              return D.get(i, v) + tie_breakers[v->id] <
-                     D.get(i, u) + tie_breakers[u->id];
-            });
+  // // sort, note: K + 1 is sufficient
+  // std::sort(C_next[i].begin(), C_next[i].begin() + K + 1,
+  //           [&](Vertex* const v, Vertex* const u) {
+  //             return D.get(i, v) + tie_breakers[v->id] <
+  //                    D.get(i, u) + tie_breakers[u->id];
+  //           });
 
   // calculate ideal dist for penalty purposes
-  int ideal_dist = D.get(ai->id, C_next[i][0]);  // Distance to goal if taking ideal move
+  int ideal_dist = D.get(ai->id, ai->C_next[i][0]);  // Distance to goal if taking ideal move
   int actual_dist;
   int round_bestp = 100000;
   bool group_exists = false;
@@ -263,7 +263,7 @@ std::pair<bool, int> Planner::OptiPIBT(Agents A, Agent* aj, int accumulated_pena
 
   
   for (size_t k = 0; k < K + 1; ++k) {
-    auto u = C_next[i][k];   //include best action for completeness
+    auto u = ai->C_next[i][k];   //include best action for completeness
     refresh_lists(A); // clear the results from the last PIBT call
     n_avail_acts += 1;
     actual_dist = D.get(ai->id, u);
@@ -271,6 +271,10 @@ std::pair<bool, int> Planner::OptiPIBT(Agents A, Agent* aj, int accumulated_pena
     if (action_penalty + accumulated_penalty >= best_penalty){
       n_skipped_acts += 1;
       continue; //bad action
+    }
+    if (action_penalty > ai->penalty){
+      n_skipped_acts += 1;
+      continue; //bad action because pibt found better
     }
     if (occupied_next[u->id] != nullptr && occupied_next[u->id] != ai){
       // The agent at vertex 'id' in occupied_next is not nullptr and not in A
@@ -319,6 +323,7 @@ std::pair<bool, int> Planner::OptiPIBT(Agents A, Agent* aj, int accumulated_pena
     // option 2: try recursing through ak and skip action if it doesn't improve
     occupied_next[u->id] = ai;
     ai->v_next = u; 
+    ai->action_penalty = action_penalty;
     // there is an unplanned agent here, let's see if we can comfortably move it
     if (ak != nullptr && ak->v_next == nullptr){
       group_exists = false;
@@ -360,6 +365,7 @@ std::pair<bool, int> Planner::OptiPIBT(Agents A, Agent* aj, int accumulated_pena
       for (auto agent : A_copy) {
         // Set the agent's v_next_best to v_next (which should be correct atm)
         agent->v_next_best = agent->v_next; 
+        agent->penalty = agent->action_penalty;
       }
       if (best_penalty == 0){
         return std::make_pair(false, round_bestp);
@@ -657,8 +663,25 @@ bool Planner::get_new_config(HNode* H, LNode* L)
       opti_deadline->time_limit_ns = overall_deadline * 1000000; // Convert ms to ns
       opti_deadline->time_limit_ns *= static_cast<double>(num_agents) / num_grouped_agents;
 
+      auto start = std::chrono::high_resolution_clock::now();
+      auto [failed, bas] = OptiPIBT(A_copy, nullptr, 0);
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count();
 
-      OptiPIBT(A_copy, nullptr, 0);
+      bool group_exists = false;
+      for (size_t i = group_no + 1; i < groups.size(); ++i) {
+        if (groups[i] == A_copy[0]->group) {
+            group_exists = true;
+            break;
+        }
+      }  
+      if (failed && !group_exists){
+        // need to add this new group to the groups list because something new has been added
+        groups.push_back(groups[group_no]);
+      }
+
+      overall_deadline -= duration;
+
       refresh_lists(A_copy);
 
       // If new groups are added, they will be processed in the next iteration
@@ -673,12 +696,13 @@ bool Planner::get_new_config(HNode* H, LNode* L)
   return true;
 }
 bool Planner::funcPIBT(Agent* ai) {
-    if (functype == "opti") {
-        // vanilla pibt with grouping logic
-        return funcPIBTgroups(ai);
-    } else {
-      return funcPIBTwswap(ai);
-    }
+  return funcPIBTgroups(ai);
+    // if (functype == "opti") {
+    //     // vanilla pibt with grouping logic
+        
+    // } else {
+    //   return funcPIBTwswap(ai);
+    // }
 }
 
 bool Planner::funcPIBTwswap(Agent* ai)
@@ -701,6 +725,7 @@ bool Planner::funcPIBTwswap(Agent* ai)
               return D.get(i, v) + tie_breakers[v->id] <
                      D.get(i, u) + tie_breakers[u->id];
             });
+  ai->C_next = C_next;
 
   Agent* swap_agent = swap_possible_and_required(ai);
   if (swap_agent != nullptr)
@@ -763,7 +788,7 @@ bool Planner::funcPIBTgroups(Agent* ai)
                      D.get(i, u) + tie_breakers[u->id];
             });
 
-  // ai->C_next = C_next;
+  ai->C_next = C_next;
   ai->penalty = 0;
   // calculate ideal dist for penalty purposes
   int ideal_dist = D.get(ai->id, C_next[i][0]);  // Distance to goal if taking ideal move
